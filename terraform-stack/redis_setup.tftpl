@@ -1,0 +1,8 @@
+#!/bin/sh
+
+sudo sed -i 's/^bind 127.0.0.1/bind 0.0.0.0/g' /etc/redis/redis.conf
+sudo sed -i 's/^# requirepass foobared/requirepass ${ redis_password }/g' /etc/redis/redis.conf
+sudo systemctl restart redis-server
+
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 6379 -j ACCEPT
+sudo netfilter-persistent save

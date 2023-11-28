@@ -1,0 +1,470 @@
+# Copyright (c) 2023, Oracle and/or its affiliates.  All rights reserved.
+#
+# This software is dual-licensed to you under the Universal Permissive License 
+# (UPL) 1.0 as shown at https://oss.oracle.com/licenses/upl or Apache License 
+# 2.0 as shown at http://www.apache.org/licenses/LICENSE-2.0. You may choose 
+# either license.
+
+title: Mastodon on OCI
+description: Case study for OCI Operations Professional
+schemaVersion: 1.1.0
+version: 20190304
+
+local: "en"
+variableGroups:
+  - title: Common Variables
+    variables:
+      - compartment_id
+      - region
+      - all_services_id
+      - all_services_cidr
+  - title: VCN
+    variables:
+      - vcn_display_name
+      - vcn_cidr_blocks
+      - vcn_dns_label
+  - title: Gateways
+    variables:
+      - internet_gateway_display_name
+      - service_gateway_display_name
+      - nat_gateway_display_name
+  - title: Route Tables
+    variables:
+      - public_route_table_display_name
+      - private_route_table_display_name
+  - title: Public Subnet
+    variables:
+      - public_subnet_display_name
+      - public_subnet_cidr_block
+      - public_subnet_dns_label
+  - title: Private Subnet
+    variables:
+      - private_subnet_display_name
+      - private_subnet_cidr_block
+      - private_subnet_dns_label
+  - title: Network Security Groups
+    variables:
+      - rails_nsg_display_name
+      - redis_nsg_display_name
+      - postgres_nsg_display_name
+      - file_storage_nsg_display_name
+  - title: File Storage System
+    variables:
+      - file_system_availability_domain
+      - file_system_display_name
+      - mount_target_display_name
+      - mount_target_hostname
+      - file_storage_export_path
+  - title: PostgreSQL Instance
+    variables:
+      - postgres_availability_domain
+      - postgres_instance_shape
+      - postgres_instance_ocpus
+      - postgres_instance_memory_in_gbs
+      - postgres_instance_image_id
+      - postgres_instance_display_name
+      - postgres_instance_hostname
+      - postgres_instance_ssh_keys
+  - title: Redis Instance
+    variables:
+      - redis_availability_domain
+      - redis_instance_shape
+      - redis_instance_ocpus
+      - redis_instance_memory_in_gbs
+      - redis_instance_image_id
+      - redis_instance_display_name
+      - redis_instance_hostname
+      - redis_instance_ssh_keys
+      - redis_password
+  - title: Mastodon Instance
+    variables:
+      - mastodon_availability_domain
+      - mastodon_instance_shape
+      - mastodon_instance_ocpus
+      - mastodon_instance_memory_in_gbs
+      - mastodon_instance_image_id
+      - mastodon_instance_display_name
+      - mastodon_instance_hostname
+      - mastodon_instance_ssh_keys
+  - title: Object Storage
+    variables:
+      - object_storage_namespace
+      - mastodon_bucket_name
+      - mastodon_bucket_infrequent_access_days
+      - mastodon_bucket_infrequent_access_enabled
+      - postgres_bucket_name
+      - postgres_bucket_archive_days
+      - postgres_bucket_archive_enabled
+      - postgres_bucket_delete_years
+      - postgres_bucket_delete_enabled
+
+
+variables:
+
+  region:
+    title: Region
+    description: Region name. List regions with 'oci iam region list'
+    type: string
+    required: true
+
+  compartment_id:
+    title: Comparment OCID
+    description: Compartment OCID to place resources
+    type: string
+    required: true
+
+  all_services_id:
+    title: All Services OCID
+    description: |
+      Region-specific service OCID for all services in the Oracle Services Network.
+      List with 'oci network service list' from the appropriate region.
+    type: string
+    required: true
+
+  all_services_cidr:
+    title: All Services CIDR
+    description: |
+      Region-specific service CIDR for all services in the Oracle Services Network.
+      List with 'oci network service list' from the appropriate region.
+    type: string
+    required: true
+
+  vcn_cidr_blocks:
+    title: CIDR Blocks
+    description: List of CIDR blocks for the private IPv4s of the VCN
+    type: array
+    items:
+      type: string
+    required: true
+
+  vcn_display_name:
+    title: VCN Display Name
+    description: Display name for the VCN
+    type: string
+    required: true
+
+  vcn_dns_label:
+    title: VCN DNS Label
+    description: Private DNS label for within the VCN
+    type: string
+    required: true
+
+  internet_gateway_display_name:
+    title: Internet Gateway Display Name
+    description: Display name for the internet gateway
+    type: string
+    required: true
+
+  service_gateway_display_name:
+    title: Service Gateway Display Name
+    description: Display name for the service gateway
+    type: string
+    required: true
+
+  nat_gateway_display_name:
+    title: NAT Gateway Display Name
+    description: Display name for the NAT gateway
+    type: string
+    required: true
+
+  public_route_table_display_name:
+    title: Public Route Table Display Name
+    description: Display name for the public route table
+    type: string
+    required: true
+
+  private_route_table_display_name:
+    title: Private Route Table Display Name
+    description: Display name for the private route table
+    type: string
+    required: true
+
+  public_subnet_cidr_block:
+    title: Public Subnet CIDR Block
+    description: Single private IPv4 CIDR block for the public subnet
+    type: string
+    required: true
+
+  public_subnet_display_name:
+    title: Public Subnet Display Name
+    description: Single private IPv4 CIDR block for the public subnet
+    type: string
+    required: true
+
+  public_subnet_dns_label:
+    title: Public Subnet DNS Label
+    description: Display name for the public subnet
+    type: string
+    required: true
+
+  private_subnet_cidr_block:
+    title: Private Subnet CIDR Block
+    description: Private DNS label for within the public subnet
+    type: string
+    required: true
+
+  private_subnet_display_name:
+    title: Private Subnet Display Name
+    description: Single private IPv4 CIDR block for the private subnet
+    type: string
+    required: true
+
+  private_subnet_dns_label:
+    title: Private Subnet DNS Label
+    description: Display name for the private subnet
+    type: string
+    required: true
+
+  rails_nsg_display_name:
+    title: Rails NSG Display Name
+    description: Diplay name for the Rails NSG
+    type: string
+    required: true
+  
+  redis_nsg_display_name:
+    title: Redis NSG Display name
+    description: Diplay name for the Redis NSG
+    type: string
+    required: true
+
+  postgres_nsg_display_name:
+    title: PostgreSQL NSG Display Name
+    description: Diplay name for the PostgreSQL NSG
+    type: string
+    required: true
+
+  file_storage_nsg_display_name:
+    title: File Storage NSG Display Name
+    description: Diplay name for the File Storage NSG
+    type: string
+    required: true
+
+  postgres_availability_domain:
+    title: PostgreSQL Instance AD
+    description: Availability domain for the PostgreSQL instance
+    type: string
+    required: true
+  
+  postgres_instance_shape:
+    title: PostgreSQL Instance Shape
+    description: Instance shape for the PostgreSQL instance
+    type: string
+    required: true
+  
+  postgres_instance_ocpus:
+    title: PostgreSQL Instance OCPUs
+    description: Number of OCPUs for the PostgreSQL instance
+    type: number
+    required: true
+  
+  postgres_instance_memory_in_gbs:
+    title: PostgreSQL Instance Memory
+    description: Number of GB of memory for the PostgreSQL instance
+    type: number
+    required: true
+  
+  postgres_instance_image_id:
+    title: PostgreSQL Instance Image
+    description: Image OCID for the PostgreSQL instance
+    type: string
+    required: true
+  
+  postgres_instance_display_name:
+    title: PostgreSQL Instance Display Name
+    description: Display name for the PostgreSQL instance
+    type: string
+    required: true
+  
+  postgres_instance_hostname:
+    title: PostgreSQL Instance Hostname
+    description: Hostname for the PostgreSQL instance
+    type: string
+    required: true
+  
+  postgres_instance_ssh_keys:
+    title: PostgreSQL Instance Authorized SSH Keys
+    description: String of authorized public SSH keys
+    type: string
+    required: true
+  
+  redis_availability_domain:
+    title: Redis Instance AD
+    description: Availability domain for the Redis instance
+    type: string
+    required: true
+  
+  redis_instance_shape:
+    title: Redis Instance Shape
+    description: Instance shape for the Redis instance
+    type: string
+    required: true
+  
+  redis_instance_ocpus:
+    title: Redis Instance OCPUs
+    description: Number of OCPUs for the Redis instance
+    type: number
+    required: true
+  
+  redis_instance_memory_in_gbs:
+    title: Redis Instance Memory
+    description: Number of GB of memory for the Redis instance
+    type: number
+    required: true
+  
+  redis_instance_image_id:
+    title: Redis Instance Image
+    description: Image OCID for the Redis instance
+    type: string
+    required: true
+  
+  redis_instance_display_name:
+    title: Redis Instance Display Name
+    description: Display name for the Redis instance
+    type: string
+    required: true
+  
+  redis_instance_hostname:
+    title: Redis Instance Hostname
+    description: Hostname for the Redis instance
+    type: string
+    required: true
+  
+  redis_instance_ssh_keys:
+    title: Redis Instance Authorized SSH Keys
+    description: String of authorized public SSH keys
+    type: string
+    required: true
+  
+  redis_password:
+    title: Redis Password
+    description: Password to access Redis
+    type: password
+    required: true
+  
+  mastodon_availability_domain:
+    title: Mastodon Instance AD
+    description: Availability domain for the Mastodon instance
+    type: string
+    required: true
+  
+  mastodon_instance_shape:
+    title: Mastodon Instance Shape
+    description: Instance shape for the Mastodon instance
+    type: string
+    required: true
+  
+  mastodon_instance_ocpus:
+    title: Mastodon Instance OCPUs
+    description: Number of OCPUs for the Mastodon instance
+    type: number
+    required: true
+  
+  mastodon_instance_memory_in_gbs:
+    title: Mastodon Instance Memory
+    description: Number of GB of memory for the Mastodon instance
+    type: number
+    required: true
+  
+  mastodon_instance_image_id:
+    title: Mastodon Instance Image
+    description: Image OCID for the Mastodon instance
+    type: string
+    required: true
+  
+  mastodon_instance_display_name:
+    title: Mastodon Instance Display Name
+    description: Display name for the Mastodon instance
+    type: string
+    required: true
+  
+  mastodon_instance_hostname:
+    title: Mastodon Instance Hostname
+    description: Hostname for the Mastodon instance
+    type: string
+    required: true
+  
+  mastodon_instance_ssh_keys:
+    title: Mastodon Instance Authorized SSH Keys
+    description: String of authorized public SSH keys
+    type: string
+    required: true
+
+  file_system_availability_domain:
+    title: File System AD
+    description: Availability domain of the file system
+    type: string
+    required: true
+  
+  file_system_display_name:
+    title: File System Display Name
+    description: Display name for the file system
+    type: string
+    required: true
+  
+  mount_target_display_name:
+    title: Mount Target Display Name
+    description: Display name for the mount target
+    type: string
+    required: true
+  
+  mount_target_hostname:
+    title: Mount Target Hostname
+    description: Hostname for the mount target
+    type: string
+    required: true
+  
+  file_storage_export_path:
+    title: Export Path
+    description: Export Path for the File System
+    type: string
+    required: true
+
+  object_storage_namespace:
+    title: Object Storage Namespace
+    description: Find with `oci os ns get`
+    type: string
+    sensitive: true
+    required: true
+  
+  mastodon_bucket_name:
+    title: Mastodon Bucket Name
+    type: string
+    required: true
+  
+  mastodon_bucket_infrequent_access_days:
+    title: 'Mastodon Bucket: Days to move objects to Infrequent Access'
+    description: Days since object last modified
+    type: number
+    required: true
+  
+  mastodon_bucket_infrequent_access_enabled:
+    title: 'Mastodon Bucket: Automatically move objects to Infrequent Access?'
+    type: boolean
+    required: true
+  
+  postgres_bucket_name:
+    title: Postgres Bucket Name
+    type: string
+    required: true
+  
+  postgres_bucket_archive_days:
+    title: 'Postgres Bucket: Days to previous versions to Archive'
+    description: Days since version became a previous version
+    type: number
+    required: true
+  
+  postgres_bucket_archive_enabled:
+    title: 'Postgres Bucket: Automatically move objects to Archive?'
+    type: boolean
+    required: true
+
+  postgres_bucket_delete_years:
+    title: 'Postgres Bucket: Years to delete previous versions'
+    description: Years since version became a previous version
+    type: number
+    required: true
+  
+  postgres_bucket_delete_enabled:
+    title: 'Postgres Bucket: Automatically delete old versions?'
+    type: boolean
+    required: true

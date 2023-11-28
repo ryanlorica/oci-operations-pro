@@ -1,0 +1,255 @@
+# Copyright (c) 2023, Oracle and/or its affiliates.  All rights reserved.
+#
+# This software is dual-licensed to you under the Universal Permissive License
+# (UPL) 1.0 as shown at https://oss.oracle.com/licenses/upl or Apache License
+# 2.0 as shown at http://www.apache.org/licenses/LICENSE-2.0. You may choose
+# either license.
+
+---
+- name: Configure Mastodon
+  hosts: mastodon
+
+  vars:
+    mastodon_config_file: # FILL #
+    admin_email: # FILL #
+    domain: # FILL #
+
+  tasks:
+
+    - name: Install Mastodon from GitHub
+      ansible.builtin.git:
+        repo: https://github.com/mastodon/mastodon.git
+        dest: /home/ubuntu/live
+        version: v4.1.2
+
+    - name: Install Mastodon Ruby dependencies with Bundler
+      community.general.bundler:
+        state: present
+        deployment_mode: true
+        exclude_groups: development test
+        chdir: /home/ubuntu/live
+      vars:
+        rbenv_root: /home/ubuntu/.rbenv
+        rbenv_ruby_version: 3.0.6
+      environment:
+        CONFIGURE_OPTS: '--no-document'
+        RBENV_ROOT: '{{ rbenv_root }}'
+        PATH: '{{ rbenv_root }}/bin:{{ rbenv_root }}/shims:{{ ansible_env.PATH }}'
+
+    - name: Install Mastodon NodeJS dependencies with Yarn
+      community.general.yarn:
+        state: present
+        path: /home/ubuntu/live
+
+    - name: Add configuration file
+      ansible.builtin.template:
+        src: '{{ mastodon_config_file }}'
+        dest: '/home/ubuntu/live/.env.production'
+        mode: u=rw,g=rw,o=rw
+      register: config
+
+    - name: Prepare database # noqa command-instead-of-shell no-changed-when ignore-errors
+      ansible.builtin.shell:
+        cmd: RAILS_ENV=production bundle exec rake db:setup
+        chdir: /home/ubuntu/live
+      vars:
+        rbenv_root: /home/ubuntu/.rbenv
+        rbenv_ruby_version: 3.0.6
+      environment:
+        RBENV_ROOT: '{{ rbenv_root }}'
+        PATH: '{{ rbenv_root }}/bin:{{ rbenv_root }}/shims:{{ ansible_env.PATH }}'
+      ignore_errors: true
+
+    - name: Precompile assets # noqa command-instead-of-shell no-changed-when
+      ansible.builtin.shell:
+        cmd: RAILS_ENV=production bundle exec rake assets:precompile
+        chdir: /home/ubuntu/live
+      vars:
+        rbenv_root: /home/ubuntu/.rbenv
+        rbenv_ruby_version: 3.0.6
+      environment:
+        RBENV_ROOT: '{{ rbenv_root }}'
+        PATH: '{{ rbenv_root }}/bin:{{ rbenv_root }}/shims:{{ ansible_env.PATH }}'
+
+    - name: Add Mastodon to Nginx sites-available
+      ansible.builtin.copy:
+        src: /home/ubuntu/live/dist/nginx.conf
+        dest: /etc/nginx/sites-available/mastodon
+        remote_src: true
+        mode: u=rw,g=rw,o=rw
+        force: false
+      become: true
+
+    - name: Link Nginx sites-enabled/mastodon to sites-avalable/mastodon
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/mastodon
+        dest: /etc/nginx/sites-enabled/mastodon
+        state: link
+      become: true
+
+    - name: Create a directory for Nginx SSL
+      ansible.builtin.file:
+        path: /etc/nginx/ssl/
+        state: directory
+        mode: u=rw,g=rw,o=rw
+      become: true
+
+    - name: Create temporary RSA key
+      ansible.builtin.command:
+        cmd: openssl genrsa -out /etc/nginx/ssl/{{ domain }}.key 2048
+        creates: /etc/nginx/ssl/{{ domain }}.key
+      become: true
+
+    - name: Create temporary SSL certificate
+      ansible.builtin.expect:
+        command: openssl req -new -key /etc/nginx/ssl/{{ domain }}.key -x509 -days 365 -out /etc/nginx/ssl/{{ domain }}.crt
+        creates: /etc/nginx/ssl/{{ domain }}.crt
+        responses:
+          'Country Name': ''
+          'State or Province Name': ''
+          'Locality Name': ''
+          'Organization Name': ''
+          'Organizational Unit Name': ''
+          'Common Name': '{{ domain }}'
+          'Email Address': '{{ admin_email }}'
+      become: true
+
+    - name: Edits the server name in Nginx configuration
+      ansible.builtin.replace:
+        path: /etc/nginx/sites-available/mastodon
+        regexp: 'server_name example.com'
+        replace: 'server_name {{ domain }}'
+      become: true
+
+    - name: Sets the directory for the Mastodon application
+      ansible.builtin.replace:
+        path: /etc/nginx/sites-available/mastodon
+        regexp: 'root /home/mastodon/live/public;'
+        replace: 'root /home/ubuntu/live/public;'
+      become: true
+
+    - name: Adds temporary RSA key to Nginx configuration
+      ansible.builtin.replace:
+        path: /etc/nginx/sites-available/mastodon
+        regexp: '# ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;'
+        replace: 'ssl_certificate_key /etc/nginx/ssl/{{ domain }}.key;'
+      become: true
+
+    - name: Adds temporary SSL cert to Nginx configuration
+      ansible.builtin.replace:
+        path: /etc/nginx/sites-available/mastodon
+        regexp: '# ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;'
+        replace: 'ssl_certificate /etc/nginx/ssl/{{ domain }}.crt;'
+      become: true
+
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+      become: true
+
+    - name: Acquire Let's Encrypt certificate
+      ansible.builtin.expect:
+        command: certbot --nginx -d {{ domain }} -v
+        responses:
+          'Enter email address': '{{ admin_email }}'
+          'Terms of Service': 'yes'
+          'share your email address': 'no'
+        creates: '/etc/letsencrypt/live/{{ domain }}/fullchain.pem'
+      become: true
+
+    - name: Add mastodon-web.service
+      ansible.builtin.copy:
+        src: /home/ubuntu/live/dist/mastodon-web.service
+        dest: /etc/systemd/system/
+        remote_src: true
+        mode: u=rw,g=r,o=r
+        force: false
+      become: true
+
+    - name: Add mastodon-streaming.service
+      ansible.builtin.copy:
+        src: /home/ubuntu/live/dist/mastodon-streaming.service
+        dest: /etc/systemd/system/
+        remote_src: true
+        mode: u=rw,g=r,o=r
+        force: false
+      become: true
+
+    - name: Add mastodon-sidekiq.service
+      ansible.builtin.copy:
+        src: /home/ubuntu/live/dist/mastodon-sidekiq.service
+        dest: /etc/systemd/system/
+        remote_src: true
+        mode: u=rw,g=r,o=r
+        force: false
+      become: true
+
+    - name: Reconfigure mastodon-web.service
+      ansible.builtin.replace:
+        path: /etc/systemd/system/mastodon-web.service
+        regexp: '/home/mastodon'
+        replace: '/home/ubuntu'
+      become: true
+
+    - name: Reconfigure mastodon-streaming.service
+      ansible.builtin.replace:
+        path: /etc/systemd/system/mastodon-streaming.service
+        regexp: '/home/mastodon'
+        replace: '/home/ubuntu'
+      become: true
+
+    - name: Reconfigure mastodon-sidekiq.service
+      ansible.builtin.replace:
+        path: /etc/systemd/system/mastodon-sidekiq.service
+        regexp: '/home/mastodon'
+        replace: '/home/ubuntu'
+      become: true
+
+    - name: Reconfigure mastodon-web.service
+      ansible.builtin.replace:
+        path: /etc/systemd/system/mastodon-web.service
+        regexp: 'User=mastodon'
+        replace: 'User=ubuntu'
+      become: true
+
+    - name: Reconfigure mastodon-streaming.service
+      ansible.builtin.replace:
+        path: /etc/systemd/system/mastodon-streaming.service
+        regexp: 'User=mastodon'
+        replace: 'User=ubuntu'
+      become: true
+
+    - name: Reconfigure mastodon-sidekiq.service
+      ansible.builtin.replace:
+        path: /etc/systemd/system/mastodon-sidekiq.service
+        regexp: 'User=mastodon'
+        replace: 'User=ubuntu'
+      become: true
+
+    - name: Reload systemd daemons
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
+
+    - name: Start mastodon-web service
+      ansible.builtin.service:
+        name: mastodon-web.service
+        state: started
+        enabled: true
+      become: true
+
+    - name: Start mastodon-sidekiq.service
+      ansible.builtin.service:
+        name: mastodon-sidekiq.service
+        state: started
+        enabled: true
+      become: true
+
+    - name: Start mastodon-streaming.service
+      ansible.builtin.service:
+        name: mastodon-streaming.service
+        state: started
+        enabled: true
+      become: true
+...
